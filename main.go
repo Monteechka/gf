@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"time"
 
@@ -16,10 +15,7 @@ func main() {
 	// Твой адрес из Tonkeeper/Wallet
 	walletAddress := "UQBkHHHtTrkYraYeABJAepEr00eMYXKaVUUter4zfNk6eUxm"
 
-	token := os.Getenv("BOT_TOKEN")
-	if token == "" {
-		log.Fatal("Ошибка: BOT_TOKEN не установлен!")
-	}
+	token := "8749363555:AAG8U7XWaLVXzkgXrymr5UcLK8xpeb4Zr1o"
 
 	pref := telebot.Settings{
 		Token:  token,
@@ -166,7 +162,6 @@ func main() {
 		// Прием заказа
 		if state, ok := userStates[c.Sender().ID]; ok && state == "waiting_order" {
 			msg := fmt.Sprintf("📥 **НОВЫЙ ЗАКАЗ!**\nОт: @%s\nЗапрос: %s\n\nID: %d",
-                         
 				c.Sender().Username, c.Text(), c.Sender().ID)
 			b.Send(telebot.ChatID(adminID), msg)
 			delete(userStates, c.Sender().ID)
