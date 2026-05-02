@@ -72,11 +72,7 @@ func main() {
 	// Старт
 	b.Handle("/start", func(c telebot.Context) error {
 		delete(userStates, c.Sender().ID)
-		photo := &telebot.Photo{
-			File:    telebot.FromDisk("banner.jpg"),
-			Caption: "👋 **Привет! Это XDrezzx Order Bot.**\n\nРазработка ботов, софта и 3D моделей.\n\nВыбирай нужный раздел ниже:",
-		}
-		return c.Send(photo, menu, telebot.ModeMarkdown)
+		return c.Send("👋 **Привет! Это XDrezzx Order Bot.**\n\nРазработка ботов, софта и 3D моделей.\n\nВыбирай нужный раздел ниже:", menu, telebot.ModeMarkdown)
 	})
 
 	// Навигация (каждая кнопка ведет в свое место)
