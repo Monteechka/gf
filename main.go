@@ -15,7 +15,7 @@ func main() {
 	// Твой адрес из Tonkeeper/Wallet
 	walletAddress := "UQBkHHHtTrkYraYeABJAepEr00eMYXKaVUUter4zfNk6eUxm"
 
-	token := "8749363555:AAG8U7XWaLVXzkgXrymr5UcLK8xpeb4Zr1o"
+	token := "8749363555:AAFvAy2n44rM0pU8VdaY72sXeXfabrtxycs"
 
 	pref := telebot.Settings{
 		Token:  token,
