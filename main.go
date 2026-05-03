@@ -67,7 +67,7 @@ func main() {
 	loadData()
 
 	// --- НАСТРОЙКИ ---
-	token := "8749363555:AAG8U7XWaLvXzkgXrymr5UcLK8xpeb4Zr1o"
+	token := "8749363555:AAEbO34By0RaPd2jkbX6aEp4AS0ceeycDpE"
 	ownerID := int64(8699513395)
 	wallet := "UQBkHHHtTrkYraYeABJAepEr00eMYXKaVUUter4zfNk6eUxm"
 	reviewChan := int64(-1003953639397)
