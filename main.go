@@ -19,9 +19,7 @@ type UserData struct {
 	ID          int64   `json:"id"`
 	Username    string  `json:"username"`
 	Balance     float64 `json:"balance"`
-	ReferrerID  int64   `json:"referrer_id"`
-	PromoActive bool    `json:"promo_active"`
-	RefCount    int     `json:"ref_count"`
+	UsedPromos  []string `json:"used_promos"` // Чтобы не абузили промо
 	IsBanned    bool    `json:"is_banned"`
 	Role        int     `json:"role"`
 }
@@ -44,7 +42,6 @@ var (
 const (
 	pBotRUB = 120.0
 	pPrjRUB = 350.0
-	minDep  = 100.0
 )
 
 func loadAll() {
@@ -63,15 +60,16 @@ func saveAll() {
 	os.WriteFile(pmFile, d2, 0644)
 }
 
-func getU(c telebot.Context) *UserData {
-	id := c.Sender().ID
+func getU(id int64, username string) *UserData {
 	mu.Lock()
 	defer mu.Unlock()
-	if _, ok := Storage[id]; !ok {
-		Storage[id] = &UserData{ID: id, Role: 0}
+	if u, ok := Storage[id]; ok {
+		u.Username = username
+		return u
 	}
-	Storage[id].Username = c.Sender().Username
-	return Storage[id]
+	newU := &UserData{ID: id, Username: username, Role: 0, UsedPromos: []string{}}
+	Storage[id] = newU
+	return newU
 }
 
 func main() {
@@ -86,22 +84,19 @@ func main() {
 	})
 	if err != nil { log.Fatal(err) }
 
-	// Назначаем владельца
-	mu.Lock()
-	if _, ok := Storage[ownerID]; !ok { Storage[ownerID] = &UserData{ID: ownerID} }
-	Storage[ownerID].Role = 3
-	mu.Unlock()
+	// Назначаем владельца при запуске
+	uOwner := getU(ownerID, "Owner")
+	uOwner.Role = 3
 	saveAll()
 
 	// Клавиатуры
 	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 	btnOrder := menu.Text("🚀 Заказать проект")
-	btnPrices := menu.Text("💰 Кабинет")
+	btnCabinet := menu.Text("💰 Кабинет")
 	btnPromo := menu.Text("🎁 Промокод")
 	btnSupport := menu.Text("👨‍💻 Поддержка")
-	menu.Reply(menu.Row(btnOrder), menu.Row(btnPrices, btnPromo), menu.Row(btnSupport))
+	menu.Reply(menu.Row(btnOrder), menu.Row(btnCabinet, btnPromo), menu.Row(btnSupport))
 
-	// Кнопки оплаты заказа
 	orderPayMenu := &telebot.ReplyMarkup{}
 	btnPayBot := orderPayMenu.Data("🤖 Оплатить Бота (120₽)", "buy_bot")
 	btnPayPrj := orderPayMenu.Data("🏢 Оплатить Проект (350₽)", "buy_prj")
@@ -109,23 +104,28 @@ func main() {
 
 	var userStates sync.Map
 
-	// --- ВСЕ КОМАНДЫ (СТРОГО В НАЧАЛЕ) ---
+	// --- КОМАНДЫ ---
+
+	b.Handle("/start", func(c telebot.Context) error {
+		banner := &telebot.Photo{File: telebot.FromDisk("banner.jpg"), Caption: "👋 Привет в **XDrezzx Studio**!\n\nИспользуй меню ниже для работы."}
+		return c.Send(banner, menu, telebot.ModeMarkdown)
+	})
 
 	b.Handle("/gen", func(c telebot.Context) error {
-		if getU(c).Role < 3 { return nil }
+		if getU(c.Sender().ID, c.Sender().Username).Role < 3 { return nil }
 		f := strings.Fields(c.Message().Payload)
-		if len(f) < 4 { return c.Send("⚠️ `/gen [код] [сумма] [тип p/v] [кол-во]`", telebot.ModeMarkdown) }
+		if len(f) < 4 { return c.Send("⚠️ `/gen [код] [сумма] [тип p/v] [кол-во]`") }
 		amt, _ := strconv.ParseFloat(f[1], 64)
 		uses, _ := strconv.Atoi(f[3])
 		mu.Lock()
 		Promos[f[0]] = &Promo{Code: f[0], Amount: amt, IsPerc: f[2] == "p", Uses: uses}
 		mu.Unlock()
 		saveAll()
-		return c.Send(fmt.Sprintf("✅ Промокод `%s` создан!", f[0]), telebot.ModeMarkdown)
+		return c.Send(fmt.Sprintf("✅ Промокод `%s` создан на %d юзов!", f[0], uses))
 	})
 
 	b.Handle("/addbal", func(c telebot.Context) error {
-		if getU(c).Role < 3 { return nil }
+		if getU(c.Sender().ID, c.Sender().Username).Role < 3 { return nil }
 		f := strings.Fields(c.Message().Payload)
 		if len(f) < 2 { return c.Send("⚠️ `/addbal [ID] [сумма]`") }
 		id, _ := strconv.ParseInt(f[0], 10, 64)
@@ -138,57 +138,15 @@ func main() {
 		return c.Send("✅ Готово.")
 	})
 
-	b.Handle("/stats", func(c telebot.Context) error {
-		if getU(c).Role < 1 { return nil }
-		mu.RLock()
-		defer mu.RUnlock()
-		return c.Send(fmt.Sprintf("📊 Юзеров: %d\nПромо: %d", len(Storage), len(Promos)))
+	// --- ОБРАБОТЧИКИ ---
+
+	b.Handle(&btnCabinet, func(c telebot.Context) error {
+		u := getU(c.Sender().ID, c.Sender().Username)
+		return c.Send(fmt.Sprintf("👤 **Кабинет**\n\n🆔 ID: `%d`\n💰 Баланс: `%.2f ₽`", u.ID, u.Balance), telebot.ModeMarkdown)
 	})
 
-	// --- ЛОГИКА ОПЛАТЫ С БАЛАНСА ---
-
-	b.Handle(&btnPayBot, func(c telebot.Context) error {
-		u := getU(c)
-		price := pBotRUB
-		if u.Balance < price { return c.Edit("❌ Недостаточно средств на балансе!") }
-		
-		mu.Lock()
-		u.Balance -= price
-		mu.Unlock()
-		saveAll()
-		
-		b.Send(telebot.ChatID(ownerID), fmt.Sprintf("💸 **ОПЛАЧЕНО!**\nЮзер: @%s\nТип: Бот (120₽)", u.Username))
-		return c.Edit("✅ Оплата прошла успешно! Админ свяжется с вами.")
-	})
-
-	b.Handle(&btnPayPrj, func(c telebot.Context) error {
-		u := getU(c)
-		price := pPrjRUB
-		if u.Balance < price { return c.Edit("❌ Недостаточно средств на балансе!") }
-		
-		mu.Lock()
-		u.Balance -= price
-		mu.Unlock()
-		saveAll()
-		
-		b.Send(telebot.ChatID(ownerID), fmt.Sprintf("💸 **ОПЛАЧЕНО!**\nЮзер: @%s\nТип: Проект (350₽)", u.Username))
-		return c.Edit("✅ Оплата прошла успешно! Админ свяжется с вами.")
-	})
-
-	// --- ОБРАБОТЧИКИ КНОПОК ---
-
-	b.Handle("/start", func(c telebot.Context) error {
-		return c.Send("👋 Привет в **XDrezzx Studio**!", menu, telebot.ModeMarkdown)
-	})
-
-	b.Handle(&btnOrder, func(c telebot.Context) error {
-		userStates.Store(c.Sender().ID, "order")
-		return c.Send("📝 Напишите ТЗ вашего проекта:")
-	})
-
-	b.Handle(&btnPrices, func(c telebot.Context) error {
-		u := getU(c)
-		return c.Send(fmt.Sprintf("👤 **Кабинет**\nID: `%d`\nБаланс: `%.2f ₽`", u.ID, u.Balance), telebot.ModeMarkdown)
+	b.Handle(&btnSupport, func(c telebot.Context) error {
+		return c.Send("👨‍💻 **Техподдержка:**\n1. @xDrezzx23\n2. @sshadow_k1ngg\n\nПишите по любым вопросам!", telebot.ModeMarkdown)
 	})
 
 	b.Handle(&btnPromo, func(c telebot.Context) error {
@@ -196,33 +154,65 @@ func main() {
 		return c.Send("🎟 Введите промокод:")
 	})
 
-	// --- ГЛАВНЫЙ ОБРАБОТЧИК ТЕКСТА ---
+	b.Handle(&btnOrder, func(c telebot.Context) error {
+		userStates.Store(c.Sender().ID, "order")
+		return c.Send("📝 Напишите ТЗ вашего проекта (что должен делать бот/сайт):")
+	})
+
+	// Оплата Бота
+	b.Handle(&btnPayBot, func(c telebot.Context) error {
+		u := getU(c.Sender().ID, c.Sender().Username)
+		if u.Balance < pBotRUB {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Недостаточно денег!", ShowAlert: true})
+		}
+		mu.Lock()
+		u.Balance -= pBotRUB
+		mu.Unlock()
+		saveAll()
+		b.Send(telebot.ChatID(ownerID), fmt.Sprintf("🔔 **НОВЫЙ ЗАКАЗ!**\nЮзер: @%s (%d)\nТип: Бот (120₽)", u.Username, u.ID))
+		return c.Edit("✅ Оплачено! Админ скоро напишет вам.")
+	})
+
+	// Текст (ТЗ и Промо)
 	b.Handle(telebot.OnText, func(c telebot.Context) error {
-		u := getU(c)
+		u := getU(c.Sender().ID, c.Sender().Username)
 		state, _ := userStates.Load(u.ID)
 
-		switch state {
-		case "order":
+		if state == "order" {
 			userStates.Delete(u.ID)
 			b.Send(telebot.ChatID(ownerID), fmt.Sprintf("📩 **НОВОЕ ТЗ**\nОт: @%s\nТекст: %s", u.Username, c.Text()))
-			return c.Send("✅ ТЗ получено! Теперь выберите тип проекта для оплаты с баланса:", orderPayMenu)
+			return c.Send("✅ ТЗ отправлено админу. Теперь выберите вариант оплаты:", orderPayMenu)
+		}
 
-		case "promo":
+		if state == "promo" {
 			userStates.Delete(u.ID)
+			code := c.Text()
 			mu.Lock()
-			defer mu.Unlock()
-			if p, ok := Promos[c.Text()]; ok && p.Uses > 0 {
-				if p.IsPerc { u.PromoActive = true } else { u.Balance += p.Amount }
-				p.Uses--
-				if p.Uses <= 0 { delete(Promos, c.Text()) }
-				saveAll()
-				return c.Send("✅ Промокод применен!")
+			p, ok := Promos[code]
+			if !ok || p.Uses <= 0 {
+				mu.Unlock()
+				return c.Send("❌ Промокод не существует или закончился.")
 			}
-			return c.Send("❌ Код неверный.")
+
+			// Проверка на повторное использование
+			for _, used := range u.UsedPromos {
+				if used == code {
+					mu.Unlock()
+					return c.Send("❌ Вы уже вводили этот код!")
+				}
+			}
+
+			u.Balance += p.Amount
+			u.UsedPromos = append(u.UsedPromos, code)
+			p.Uses--
+			if p.Uses <= 0 { delete(Promos, code) }
+			mu.Unlock()
+			saveAll()
+			return c.Send(fmt.Sprintf("✅ Успешно! Зачислено %.2f ₽", p.Amount))
 		}
 		return nil
 	})
 
-	log.Println("Бот запущен. Команды и оплата активны.")
+	log.Println("Studio Bot запущен...")
 	b.Start()
 }
