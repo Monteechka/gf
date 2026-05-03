@@ -1,0 +1,16 @@
+{
+  "0": {
+    "referrer_id": 0,
+    "promo_active": false,
+    "ref_count": 0,
+    "is_banned": true,
+    "role": 0
+  },
+  "8699513395": {
+    "referrer_id": 0,
+    "promo_active": false,
+    "ref_count": 0,
+    "is_banned": false,
+    "role": 3
+  }
+}
